@@ -13,6 +13,7 @@ class SuggestionsOverlay extends Component {
     scrollFocusedIntoView: PropTypes.bool,
     isLoading: PropTypes.bool,
     onSelect: PropTypes.func,
+    onEditBlur: PropTypes.func,
     ignoreAccents: PropTypes.bool,
 
     children: PropTypes.oneOfType([
@@ -24,6 +25,7 @@ class SuggestionsOverlay extends Component {
   static defaultProps = {
     suggestions: {},
     onSelect: () => null,
+    onEditBlur: () => null,
   }
 
   componentDidUpdate() {
@@ -50,6 +52,11 @@ class SuggestionsOverlay extends Component {
     }
   }
 
+  handleEdit(value, queryInfo) {
+    if (value.length < 2) { return null; }
+    this.select({ id: value, display: value }, queryInfo, false);
+  }
+
   render() {
     const { suggestions, isLoading, style, onMouseDown } = this.props
 
@@ -60,6 +67,8 @@ class SuggestionsOverlay extends Component {
 
     return (
       <div {...style} onMouseDown={onMouseDown}>
+        {this.renderEdit()}
+
         <ul
           ref={el => {
             this.suggestionsRef = el
@@ -72,6 +81,31 @@ class SuggestionsOverlay extends Component {
         {this.renderLoadingIndicator()}
       </div>
     )
+  }
+
+  renderEdit() {
+    const { style, onEditBlur } = this.props;
+
+    const queryInfo =
+     Object.values(this.props.suggestions).reduce(
+       (accResults, { results, queryInfo }) => queryInfo,
+       {}
+     )
+
+    const { mention } = queryInfo;
+
+    if (!mention) { return null; }
+
+    return (
+      <div>
+        <input
+          value={mention}
+          onBlur={onEditBlur}
+          onChange={({ target: { value } }) => this.handleEdit(value, queryInfo)}
+          {...style('edit')}
+        />
+      </div>
+    );
   }
 
   renderSuggestions() {
@@ -134,8 +168,8 @@ class SuggestionsOverlay extends Component {
     }
   }
 
-  select(suggestion, queryInfo) {
-    this.props.onSelect(suggestion, queryInfo)
+  select(suggestion, queryInfo, refocus = true) {
+    this.props.onSelect(suggestion, queryInfo, refocus)
   }
 }
 
@@ -151,6 +185,11 @@ const styled = defaultStyle(({ position }) => ({
     margin: 0,
     padding: 0,
     listStyleType: 'none',
+  },
+
+  edit: {
+    boxSizing: 'border-box',
+    width: '100%',
   },
 }))
 
