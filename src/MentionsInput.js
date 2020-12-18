@@ -105,6 +105,7 @@ class MentionsInput extends React.Component {
   static propTypes = propTypes
 
   static defaultProps = {
+    allowSpaceInQuery: true,
     ignoreAccents: false,
     singleLine: false,
     allowSuggestionsAboveCursor: false,
@@ -201,6 +202,7 @@ class MentionsInput extends React.Component {
         !disabled && {
           onChange: this.handleChange,
           onSelect: this.handleSelect,
+          onEditBlur: this.handleBlur,
           onKeyDown: this.handleKeyDown,
           onBlur: this.handleBlur,
           onCompositionStart: this.handleCompositionStart,
@@ -537,6 +539,7 @@ class MentionsInput extends React.Component {
     const el = this.inputRef
     if (ev.target.selectionStart === ev.target.selectionEnd) {
       this.updateMentionsQueries(el.value, ev.target.selectionStart)
+      setTimeout(() => this.updateSuggestionsPosition(), 1)
     } else {
       this.clearSuggestions()
     }
@@ -618,23 +621,25 @@ class MentionsInput extends React.Component {
   }
 
   handleBlur = ev => {
-    const clickedSuggestion = this._suggestionsMouseDown
-    this._suggestionsMouseDown = false
+    setTimeout(() => {
+      const clickedSuggestion = this._suggestionsMouseDown
+      this._suggestionsMouseDown = false
 
-    // only reset selection if the mousedown happened on an element
-    // other than the suggestions overlay
-    if (!clickedSuggestion) {
-      this.setState({
-        selectionStart: null,
-        selectionEnd: null,
-      })
-    }
+      // only reset selection if the mousedown happened on an element
+      // other than the suggestions overlay
+      if (!clickedSuggestion) {
+        this.setState({
+          selectionStart: null,
+          selectionEnd: null,
+        })
+      }
 
-    window.setTimeout(() => {
-      this.updateHighlighterScroll()
+      window.setTimeout(() => {
+        this.updateHighlighterScroll()
+      }, 1)
+
+      this.props.onBlur(ev, clickedSuggestion)
     }, 1)
-
-    this.props.onBlur(ev, clickedSuggestion)
   }
 
   handleSuggestionsMouseDown = ev => {
@@ -774,7 +779,7 @@ class MentionsInput extends React.Component {
     }
   }
 
-  updateMentionsQueries = (plainTextValue, caretPosition) => {
+  updateMentionsQueries = (plainTextValue, caretPosition, value = this.props.value || '') => {
     // Invalidate previous queries. Async results for previous queries will be neglected.
     this._queryId++
     this.suggestions = {}
@@ -782,7 +787,6 @@ class MentionsInput extends React.Component {
       suggestions: {},
     })
 
-    const value = this.props.value || ''
     const { children } = this.props
     const config = readConfigFromChildren(children)
 
@@ -793,17 +797,21 @@ class MentionsInput extends React.Component {
       'NULL'
     )
 
-    // If caret is inside of mention, do not query
-    if (positionInValue === null) {
-      return
-    }
+    const mentionInCaret = mapPlainTextIndex(
+      value,
+      config,
+      caretPosition,
+      'MENTION'
+    )
+
+    const isInMention = positionInValue === null
 
     // Extract substring in between the end of the previous mention and the caret
     const substringStartIndex = getEndOfLastMention(
       value.substring(0, positionInValue),
       config
     )
-    const substring = plainTextValue.substring(
+    const substring = isInMention ? '' : plainTextValue.substring(
       substringStartIndex,
       caretPosition
     )
@@ -817,15 +825,22 @@ class MentionsInput extends React.Component {
 
       const regex = makeTriggerRegex(child.props.trigger, this.props)
       const match = substring.match(regex)
-      if (match) {
-        const querySequenceStart =
+      if (match || isInMention) {
+        const querySequenceStart = isInMention ?
+          mentionInCaret.mentionStart :
           substringStartIndex + substring.indexOf(match[1], match.index)
+
+        const querySequenceEnd = isInMention ?
+           mentionInCaret.mentionEnd :
+           querySequenceStart + match[1].length
+
         this.queryData(
-          match[2],
+          isInMention ? '' : match[2],
           childIndex,
           querySequenceStart,
-          querySequenceStart + match[1].length,
-          plainTextValue
+          querySequenceEnd,
+          plainTextValue,
+          isInMention ? mentionInCaret.id : null,
         )
       }
     })
@@ -846,7 +861,8 @@ class MentionsInput extends React.Component {
     childIndex,
     querySequenceStart,
     querySequenceEnd,
-    plainTextValue
+    plainTextValue,
+    mention
   ) => {
     const { children, ignoreAccents } = this.props
     const mentionChild = Children.toArray(children)[childIndex]
@@ -860,7 +876,8 @@ class MentionsInput extends React.Component {
         query,
         querySequenceStart,
         querySequenceEnd,
-        plainTextValue
+        plainTextValue,
+        mention
       )
     )
     if (syncResult instanceof Array) {
@@ -871,6 +888,7 @@ class MentionsInput extends React.Component {
         querySequenceStart,
         querySequenceEnd,
         plainTextValue,
+        mention,
         syncResult
       )
     }
@@ -883,6 +901,7 @@ class MentionsInput extends React.Component {
     querySequenceStart,
     querySequenceEnd,
     plainTextValue,
+    mention,
     results
   ) => {
     // neglect async results from previous queries
@@ -899,6 +918,7 @@ class MentionsInput extends React.Component {
           querySequenceStart,
           querySequenceEnd,
           plainTextValue,
+          mention,
         },
         results,
       },
@@ -917,7 +937,8 @@ class MentionsInput extends React.Component {
 
   addMention = (
     { id, display },
-    { childIndex, querySequenceStart, querySequenceEnd, plainTextValue }
+    { childIndex, query, querySequenceStart, querySequenceEnd, plainTextValue, mention },
+    refocus
   ) => {
     // Insert mention in the marked up value at the correct position
     const value = this.props.value || ''
@@ -939,18 +960,20 @@ class MentionsInput extends React.Component {
     const newValue = spliceString(value, start, end, insert)
 
     // Refocus input and set caret position to end of mention
-    this.inputRef.focus()
+    if (refocus) { this.inputRef.focus() }
 
     let displayValue = displayTransform(id, display)
     if (appendSpaceOnAdd) {
       displayValue += ' '
     }
     const newCaretPosition = querySequenceStart + displayValue.length
-    this.setState({
-      selectionStart: newCaretPosition,
-      selectionEnd: newCaretPosition,
-      setSelectionAfterMentionChange: true,
-    })
+    if (refocus) {
+      this.setState({
+        selectionStart: newCaretPosition,
+        selectionEnd: newCaretPosition,
+        setSelectionAfterMentionChange: true,
+      })
+    }
 
     // Propagate change
     const eventMock = { target: { value: newValue } }
@@ -958,7 +981,7 @@ class MentionsInput extends React.Component {
     const newPlainTextValue = spliceString(
       plainTextValue,
       querySequenceStart,
-      querySequenceEnd,
+      mention ? querySequenceStart + mention.length : querySequenceEnd,
       displayValue
     )
 
@@ -969,7 +992,11 @@ class MentionsInput extends React.Component {
     }
 
     // Make sure the suggestions overlay is closed
-    this.clearSuggestions()
+    if (refocus) {
+      this.clearSuggestions()
+    } else {
+      this.updateMentionsQueries(newPlainTextValue, querySequenceStart + 1, newValue);
+    }
   }
 
   isLoading = () => {

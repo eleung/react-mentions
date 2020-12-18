@@ -7,6 +7,7 @@ import iterateMentionsMarkup from './iterateMentionsMarkup'
 //   - 'START' to return the index of the mention markup's first char (default)
 //   - 'END' to return the index after its last char
 //   - 'NULL' to return null
+//   - 'MENTION' to return null
 const mapPlainTextIndex = (
   value,
   config,
@@ -43,6 +44,15 @@ const mapPlainTextIndex = (
       // depending on whether the `inMarkupCorrection`
       if (inMarkupCorrection === 'NULL') {
         result = null
+      } else if (inMarkupCorrection === 'MENTION') {
+         result = {
+           id,
+           display,
+           start: index,
+           end: index + markup.length,
+           mentionStart: mentionPlainTextIndex,
+           mentionEnd: mentionPlainTextIndex + markup.length,
+         }
       } else {
         result = index + (inMarkupCorrection === 'END' ? markup.length : 0)
       }
